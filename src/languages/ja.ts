@@ -6496,6 +6496,7 @@ ${
     },
     report: {
         newReport: {
+            createExpense: '経費を作成',
             createReport: 'レポートを作成',
             chooseWorkspace: 'このレポートのワークスペースを選択してください。',
             emptyReportConfirmationTitle: '空のレポートがすでにあります',

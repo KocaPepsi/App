@@ -606,6 +606,9 @@ const ONYXKEYS = {
     /** Whether the user has denied the contact import permission prompt */
     HAS_DENIED_CONTACT_IMPORT_PROMPT: 'hasDeniedContactImportPrompt',
 
+    /** Keeps track if OpenApp failure modal is opened */
+    IS_OPEN_CONFIRM_NAVIGATE_EXPENSIFY_CLASSIC_MODAL_OPEN: 'IsOpenConfirmNavigateExpensifyClassicModalOpen',
+
     /** Collection Keys */
     COLLECTION: {
         DOMAIN: 'domain_',
@@ -1119,6 +1122,7 @@ type OnyxValuesMapping = {
     [ONYXKEYS.STASHED_CREDENTIALS]: OnyxTypes.Credentials;
     [ONYXKEYS.MODAL]: OnyxTypes.Modal;
     [ONYXKEYS.IS_OPEN_APP_FAILURE_MODAL_OPEN]: boolean;
+    [ONYXKEYS.IS_OPEN_CONFIRM_NAVIGATE_EXPENSIFY_CLASSIC_MODAL_OPEN]: boolean;
     [ONYXKEYS.FULLSCREEN_VISIBILITY]: boolean;
     [ONYXKEYS.NETWORK]: OnyxTypes.Network;
     [ONYXKEYS.NEW_GROUP_CHAT_DRAFT]: OnyxTypes.NewGroupChatDraft;
