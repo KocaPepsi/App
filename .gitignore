@@ -160,3 +160,6 @@ modules/*/lib/
 
 # cspell cache
 .cspellcache
+
+# Git worktrees
+.worktrees/
