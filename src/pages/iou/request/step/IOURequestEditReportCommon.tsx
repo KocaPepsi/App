@@ -20,10 +20,12 @@ import useReportTransactions from '@hooks/useReportTransactions';
 import Navigation from '@libs/Navigation/Navigation';
 import {isPolicyAdmin} from '@libs/PolicyUtils';
 import {canAddTransaction, getPolicyName, getReportName, isIOUReport, isOpenReport, isReportOwner, sortOutstandingReportsBySelected} from '@libs/ReportUtils';
+import {shouldRestrictUserBillableActions} from '@libs/SubscriptionUtils';
 import {isPerDiemRequest as isPerDiemRequestUtil} from '@libs/TransactionUtils';
 import CONST from '@src/CONST';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {Route} from '@src/ROUTES';
+import ROUTES from '@src/ROUTES';
 import type {Report} from '@src/types/onyx';
 import {isEmptyObject} from '@src/types/utils/EmptyObject';
 import StepScreenWrapper from './StepScreenWrapper';
@@ -38,6 +40,7 @@ type Props = {
     transactionIDs?: string[];
     selectedReportID?: string;
     selectedPolicyID?: string;
+    transactionPolicyID?: string;
     targetOwnerAccountID?: number;
     selectReport: (item: TransactionGroupListItem, report?: OnyxEntry<Report>) => void;
     removeFromReport?: () => void;
@@ -55,6 +58,7 @@ function IOURequestEditReportCommon({
     selectedReportID,
     selectedPolicyID,
     targetOwnerAccountID,
+    transactionPolicyID,
     removeFromReport,
     isEditing = false,
     isUnreported,
@@ -81,7 +85,11 @@ function IOURequestEditReportCommon({
         return currentUserPersonalDetails.accountID;
     }, [targetOwnerAccountID, selectedReport?.ownerAccountID, currentUserPersonalDetails.accountID]);
     const reportPolicy = usePolicy(selectedReport?.policyID);
-    const {policyForMovingExpenses} = usePolicyForMovingExpenses(isPerDiemRequest);
+    // Pass the expense's policyID so that the "Create report" button shows the correct workspace
+    // instead of defaulting to the user's active workspace
+    // we need to fall back to transactionPolicyID because for a new workspace there is no report created yet
+    // and if we choose this workspace as participant we want to create a new report in the chosen workspace
+    const {policyForMovingExpenses} = usePolicyForMovingExpenses(isPerDiemRequest, selectedReport?.policyID ?? transactionPolicyID);
 
     const [perDiemWarningModalVisible, setPerDiemWarningModalVisible] = useState(false);
 
@@ -91,6 +99,7 @@ function IOURequestEditReportCommon({
         () => resolvedReportOwnerAccountID === currentUserPersonalDetails.accountID || isSelectedReportUnreported,
         [resolvedReportOwnerAccountID, currentUserPersonalDetails.accountID, isSelectedReportUnreported],
     );
+    const isAdmin = useMemo(() => isPolicyAdmin(reportPolicy), [reportPolicy]);
     const isReportIOU = selectedReport ? isIOUReport(selectedReport) : false;
 
     const reportTransactions = useReportTransactions(selectedReportID);
@@ -119,11 +128,12 @@ function IOURequestEditReportCommon({
             .filter((report) => !debouncedSearchValue || report?.reportName?.toLowerCase().includes(debouncedSearchValue.toLowerCase()))
             .filter((report): report is NonNullable<typeof report> => report !== undefined)
             .filter((report) => {
+                const policy = allPolicies?.[`${ONYXKEYS.COLLECTION.POLICY}${report.policyID}`];
+
                 if (canAddTransaction(report, undefined, true)) {
                     return true;
                 }
 
-                const policy = allPolicies?.[`${ONYXKEYS.COLLECTION.POLICY}${report.policyID}`];
                 const isReportPolicyAdmin = isPolicyAdmin(policy);
                 const isReportManager = report.managerID === currentUserPersonalDetails.accountID;
                 return isReportPolicyAdmin || isReportManager;
@@ -202,9 +212,16 @@ function IOURequestEditReportCommon({
             navigateBack();
             return;
         }
+
+        if (item?.policyID && shouldRestrictUserBillableActions(item.policyID)) {
+            Navigation.navigate(ROUTES.RESTRICTED_ACTION.getRoute(item.policyID));
+            return;
+        }
+
         if (!validatePerDiemMove(item.policyID)) {
             return;
         }
+
         selectReport(item);
     };
 
@@ -218,7 +235,7 @@ function IOURequestEditReportCommon({
     const headerMessage = useMemo(() => (searchValue && !reportOptions.length ? translate('common.noResultsFound') : ''), [searchValue, reportOptions.length, translate]);
 
     const createReportOption = useMemo(() => {
-        if (!createReport) {
+        if (!createReport || (isEditing && !isOwner && !isAdmin)) {
             return undefined;
         }
 
@@ -230,7 +247,7 @@ function IOURequestEditReportCommon({
                 icon={icons.Document}
             />
         );
-    }, [icons.Document, createReport, translate, policyForMovingExpenses?.name, handleCreateReport]);
+    }, [icons.Document, createReport, translate, policyForMovingExpenses?.name, handleCreateReport, isEditing, isOwner, isAdmin]);
 
     // eslint-disable-next-line rulesdir/no-negated-variables
     const shouldShowNotFoundPage = useMemo(() => {
@@ -246,12 +263,11 @@ function IOURequestEditReportCommon({
             return false;
         }
 
-        const isAdmin = isPolicyAdmin(reportPolicy);
         const isOpen = isOpenReport(selectedReport);
         const isSubmitter = isReportOwner(selectedReport);
         // If the report is Open, then only submitters, admins can move expenses
         return isOpen && !isAdmin && !isSubmitter;
-    }, [createReportOption, outstandingReports.length, shouldShowNotFoundPageFromProps, selectedReport, reportPolicy]);
+    }, [createReportOption, outstandingReports.length, shouldShowNotFoundPageFromProps, selectedReport, isAdmin]);
 
     const hidePerDiemWarningModal = () => setPerDiemWarningModalVisible(false);
 

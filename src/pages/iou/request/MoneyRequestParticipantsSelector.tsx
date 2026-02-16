@@ -1,5 +1,4 @@
 import reportsSelector from '@selectors/Attributes';
-import {emailSelector} from '@selectors/Session';
 import {transactionDraftValuesSelector} from '@selectors/TransactionDraft';
 import {deepEqual} from 'fast-equals';
 import lodashPick from 'lodash/pick';
@@ -20,6 +19,7 @@ import SelectionList from '@components/SelectionListWithSections';
 import InviteMemberListItem from '@components/SelectionListWithSections/InviteMemberListItem';
 import type {SelectionListHandle} from '@components/SelectionListWithSections/types';
 import useContactImport from '@hooks/useContactImport';
+import useCurrentUserPersonalDetails from '@hooks/useCurrentUserPersonalDetails';
 import useDismissedReferralBanners from '@hooks/useDismissedReferralBanners';
 import {useMemoizedLazyExpensifyIcons} from '@hooks/useLazyAsset';
 import useLocalize from '@hooks/useLocalize';
@@ -117,7 +117,10 @@ function MoneyRequestParticipantsSelector({
     const [allPolicies] = useOnyx(ONYXKEYS.COLLECTION.POLICY, {canBeMissing: true});
     const policy = allPolicies?.[`${ONYXKEYS.COLLECTION.POLICY}${activePolicyID}`];
     const [isSearchingForReports] = useOnyx(ONYXKEYS.IS_SEARCHING_FOR_REPORTS, {canBeMissing: true, initWithStoredValues: false});
-    const [currentUserLogin] = useOnyx(ONYXKEYS.SESSION, {canBeMissing: true, selector: emailSelector});
+    const currentUserPersonalDetails = useCurrentUserPersonalDetails();
+    const currentUserLogin = currentUserPersonalDetails.login;
+    const currentUserEmail = currentUserPersonalDetails.email ?? '';
+    const currentUserAccountID = currentUserPersonalDetails.accountID;
     const [reportAttributesDerived] = useOnyx(ONYXKEYS.DERIVED.REPORT_ATTRIBUTES, {canBeMissing: true, selector: reportsSelector});
     const [countryCode = CONST.DEFAULT_COUNTRY_CODE] = useOnyx(ONYXKEYS.COUNTRY_CODE, {canBeMissing: false});
     const [loginList] = useOnyx(ONYXKEYS.LOGIN_LIST, {canBeMissing: true});
@@ -215,26 +218,27 @@ function MoneyRequestParticipantsSelector({
         [isIOUSplit, iouType, onParticipantsAdded],
     );
 
-    const {searchTerm, debouncedSearchTerm, setSearchTerm, availableOptions, selectedOptions, toggleSelection, areOptionsInitialized, onListEndReached, contactState} = useSearchSelector({
-        selectionMode: isIOUSplit ? CONST.SEARCH_SELECTOR.SELECTION_MODE_MULTI : CONST.SEARCH_SELECTOR.SELECTION_MODE_SINGLE,
-        searchContext: CONST.SEARCH_SELECTOR.SEARCH_CONTEXT_GENERAL,
-        includeUserToInvite: !isCategorizeOrShareAction && !isPerDiemRequest,
-        excludeLogins: CONST.EXPENSIFY_EMAILS_OBJECT,
-        includeRecentReports: true,
-        maxRecentReportsToShow: CONST.IOU.MAX_RECENT_REPORTS_TO_SHOW,
-        getValidOptionsConfig,
-        shouldInitialize: didScreenTransitionEnd,
-        enablePhoneContacts: isNative,
-        contactOptions: contacts,
-        initialSelected: participants as OptionData[],
-        onSelectionChange: handleSelectionChange,
-        onSingleSelect: (option: OptionData) => {
-            if (isIOUSplit) {
-                return;
-            }
-            addSingleParticipant(option);
-        },
-    });
+    const {searchTerm, debouncedSearchTerm, setSearchTerm, availableOptions, selectedOptions, setSelectedOptions, toggleSelection, areOptionsInitialized, onListEndReached, contactState} =
+        useSearchSelector({
+            selectionMode: isIOUSplit ? CONST.SEARCH_SELECTOR.SELECTION_MODE_MULTI : CONST.SEARCH_SELECTOR.SELECTION_MODE_SINGLE,
+            searchContext: CONST.SEARCH_SELECTOR.SEARCH_CONTEXT_GENERAL,
+            includeUserToInvite: !isCategorizeOrShareAction && !isPerDiemRequest,
+            excludeLogins: CONST.EXPENSIFY_EMAILS_OBJECT,
+            includeRecentReports: true,
+            maxRecentReportsToShow: CONST.IOU.MAX_RECENT_REPORTS_TO_SHOW,
+            getValidOptionsConfig,
+            shouldInitialize: didScreenTransitionEnd,
+            enablePhoneContacts: isNative,
+            contactOptions: contacts,
+            initialSelected: participants as OptionData[],
+            onSelectionChange: handleSelectionChange,
+            onSingleSelect: (option: OptionData) => {
+                if (isIOUSplit) {
+                    return;
+                }
+                addSingleParticipant(option);
+            },
+        });
 
     const cleanSearchTerm = useMemo(() => debouncedSearchTerm.trim().toLowerCase(), [debouncedSearchTerm]);
 
@@ -250,7 +254,7 @@ function MoneyRequestParticipantsSelector({
                 !!availableOptions?.userToInvite,
                 debouncedSearchTerm.trim(),
                 countryCode,
-                participants.some((participant) => getPersonalDetailSearchTerms(participant).join(' ').toLowerCase().includes(cleanSearchTerm)),
+                participants.some((participant) => getPersonalDetailSearchTerms(participant, currentUserAccountID).join(' ').toLowerCase().includes(cleanSearchTerm)),
             ),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [
@@ -263,6 +267,7 @@ function MoneyRequestParticipantsSelector({
             debouncedSearchTerm,
             participants,
             countryCode,
+            currentUserAccountID,
         ],
     );
 
@@ -287,13 +292,15 @@ function MoneyRequestParticipantsSelector({
             participants.map((participant) => ({...participant, reportID: participant.reportID})) as OptionData[],
             [],
             [],
+            currentUserAccountID,
             personalDetails,
             true,
             undefined,
             reportAttributesDerived,
         );
-
-        newSections.push(formatResults.section);
+        // Just a temporary fix to satisfy the type checker
+        // Will be fixed when migrating to use new SelectionListWithSections
+        newSections.push({...formatResults.section, title: undefined, shouldShow: true});
 
         newSections.push({
             title: translate('workspace.common.workspace'),
@@ -331,6 +338,7 @@ function MoneyRequestParticipantsSelector({
                     status: availableOptions.userToInvite?.status ?? undefined,
                 },
                 loginList,
+                currentUserEmail,
             ) &&
             !isPerDiemRequest
         ) {
@@ -338,7 +346,9 @@ function MoneyRequestParticipantsSelector({
                 title: undefined,
                 data: [availableOptions.userToInvite].map((participant) => {
                     const isPolicyExpenseChat = participant?.isPolicyExpenseChat ?? false;
-                    return isPolicyExpenseChat ? getPolicyExpenseReportOption(participant, reportAttributesDerived) : getParticipantsOption(participant, personalDetails);
+                    return isPolicyExpenseChat
+                        ? getPolicyExpenseReportOption(participant, currentUserAccountID, personalDetails, reportAttributesDerived)
+                        : getParticipantsOption(participant, personalDetails);
                 }),
                 shouldShow: true,
             });
@@ -368,6 +378,8 @@ function MoneyRequestParticipantsSelector({
         isPerDiemRequest,
         showImportContacts,
         inputHelperText,
+        currentUserAccountID,
+        currentUserEmail,
     ]);
 
     /**
@@ -403,9 +415,15 @@ function MoneyRequestParticipantsSelector({
                 return;
             }
 
+            // If the selected option is self DM, we need to recall onParticipantsAdded to handle navigation correctly
+            if (!option && selectedOptions.length === 1 && selectedOptions.at(0)?.isSelfDM) {
+                onParticipantsAdded(selectedOptions.map((selectedOption) => sanitizedSelectedParticipant(selectedOption, iouType)));
+                return;
+            }
+
             onFinish(CONST.IOU.TYPE.SPLIT);
         },
-        [shouldShowSplitBillErrorMessage, onFinish, addSingleParticipant, selectedOptions.length],
+        [shouldShowSplitBillErrorMessage, onFinish, addSingleParticipant, onParticipantsAdded, selectedOptions, iouType],
     );
 
     const showLoadingPlaceholder = useMemo(() => !areOptionsInitialized || !didScreenTransitionEnd, [areOptionsInitialized, didScreenTransitionEnd]);
@@ -461,6 +479,7 @@ function MoneyRequestParticipantsSelector({
                         pressOnEnter
                         large
                         isDisabled={shouldShowSplitBillErrorMessage}
+                        sentryLabel={CONST.SENTRY_LABEL.MONEY_REQUEST.PARTICIPANTS_NEXT_BUTTON}
                     />
                 )}
                 {isCategorizeOrShareAction && (
@@ -470,6 +489,7 @@ function MoneyRequestParticipantsSelector({
                         onPress={() => onFinish()}
                         pressOnEnter
                         large
+                        sentryLabel={CONST.SENTRY_LABEL.MONEY_REQUEST.PARTICIPANTS_NEW_WORKSPACE_BUTTON}
                     />
                 )}
             </>
@@ -499,9 +519,11 @@ function MoneyRequestParticipantsSelector({
                 return;
             }
 
+            const reportID = option.reportID ?? CONST.REPORT.UNREPORTED_REPORT_ID;
+            setSelectedOptions([{...option, isSelected: true, reportID, keyForList: reportID}]);
             addSingleParticipant(option);
         },
-        [isIOUSplit, addParticipantToSelection, addSingleParticipant],
+        [isIOUSplit, addParticipantToSelection, addSingleParticipant, setSelectedOptions],
     );
 
     const importContactsButtonComponent = useMemo(() => {
@@ -515,6 +537,7 @@ function MoneyRequestParticipantsSelector({
                 icon={icons.UserPlus}
                 onPress={goToSettings}
                 shouldShowRightIcon
+                sentryLabel={CONST.SENTRY_LABEL.MONEY_REQUEST.PARTICIPANTS_IMPORT_CONTACTS_ITEM}
             />
         );
     }, [icons.UserPlus, contactState?.showImportUI, showImportContacts, translate]);
